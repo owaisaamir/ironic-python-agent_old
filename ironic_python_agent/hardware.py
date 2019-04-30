@@ -18,6 +18,7 @@ import functools
 import json
 from multiprocessing.pool import ThreadPool
 import os
+import re
 import shlex
 import time
 
@@ -32,6 +33,7 @@ import psutil
 import pyudev
 import six
 import stevedore
+import yaml
 
 from ironic_python_agent import encoding
 from ironic_python_agent import errors
@@ -47,7 +49,7 @@ WARN_BIOSDEVNAME_NOT_FOUND = False
 UNIT_CONVERTER = pint.UnitRegistry(filename=None)
 UNIT_CONVERTER.define('bytes = []')
 UNIT_CONVERTER.define('MB = 1048576 bytes')
-
+_MEMORY_ID_RE = re.compile(r'^memory(:\d+)?$')
 NODE = None
 
 
@@ -112,19 +114,31 @@ def _check_for_iscsi():
                     "Error: %s", e)
 
 
-def list_all_block_devices(block_type='disk'):
+def list_all_block_devices(block_type='disk',
+                           ignore_raid=False):
     """List all physical block devices
 
     The switches we use for lsblk: P for KEY="value" output, b for size output
-    in bytes, d to exclude dependent devices (like md or dm devices), i to
-    ensure ascii characters only, and o to specify the fields/columns we need.
+    in bytes, i to ensure ascii characters only, and o to specify the
+    fields/columns we need.
 
     Broken out as its own function to facilitate custom hardware managers that
     don't need to subclass GenericHardwareManager.
 
     :param block_type: Type of block device to find
+    :param ignore_raid: Ignore auto-identified raid devices, example: md0
+                        Defaults to false as these are generally disk
+                        devices and should be treated as such if encountered.
     :return: A list of BlockDevices
     """
+
+    def _is_known_device(existing, new_device_name):
+        """Return true if device name is already known."""
+        for known_dev in existing:
+            if os.path.join('/dev', new_device_name) == known_dev.name:
+                return True
+        return False
+
     _udev_settle()
 
     # map device names to /dev/disk/by-path symbolic links that points to it
@@ -144,14 +158,16 @@ def list_all_block_devices(block_type='disk'):
             by_path_mapping[devname] = path
 
     except OSError as e:
+        # NOTE(TheJulia): This is for multipath detection, and will raise
+        # some warning logs with unrelated tests.
         LOG.warning("Path %(path)s is inaccessible, /dev/disk/by-path/* "
                     "version of block device name is unavailable "
                     "Cause: %(error)s", {'path': disk_by_path_dir, 'error': e})
 
     columns = ['KNAME', 'MODEL', 'SIZE', 'ROTA', 'TYPE']
-    report = utils.execute('lsblk', '-Pbdi', '-o{}'.format(','.join(columns)),
+    report = utils.execute('lsblk', '-Pbi', '-o{}'.format(','.join(columns)),
                            check_exit_code=[0])[0]
-    lines = report.split('\n')
+    lines = report.splitlines()
     context = pyudev.Context()
 
     devices = []
@@ -162,11 +178,26 @@ def list_all_block_devices(block_type='disk'):
         for key, val in (v.split('=', 1) for v in vals):
             device[key] = val.strip()
         # Ignore block types not specified
-        if device.get('TYPE') != block_type:
-            LOG.debug(
-                "TYPE did not match. Wanted: {!r} but found: {!r}".format(
-                    block_type, line))
+        devtype = device.get('TYPE')
+
+        # We already have devices, we should ensure we don't store duplicates.
+        if _is_known_device(devices, device.get('KNAME')):
             continue
+
+        # Search for raid in the reply type, as RAID is a
+        # disk device, and we should honor it if is present.
+        # Other possible type values, which we skip recording:
+        #   lvm, part, rom, loop
+        if devtype != block_type:
+            if devtype is not None and 'raid' in devtype and not ignore_raid:
+                LOG.debug(
+                    "TYPE detected to contain 'raid', signifying a RAID "
+                    "volume. Found: {!r}".format(line))
+            else:
+                LOG.debug(
+                    "TYPE did not match. Wanted: {!r} but found: {!r}".format(
+                        block_type, line))
+                continue
 
         # Ensure all required columns are at least present, even if blank
         missing = set(columns) - set(device)
@@ -334,7 +365,12 @@ class HardwareManager(object):
     def get_cpus(self):
         raise errors.IncompatibleHardwareMethodError
 
-    def list_block_devices(self):
+    def list_block_devices(self, include_partitions=False):
+        """List physical block devices
+
+        :param include_partitions: If to include partitions
+        :return: A list of BlockDevices
+        """
         raise errors.IncompatibleHardwareMethodError
 
     def get_memory(self):
@@ -344,6 +380,9 @@ class HardwareManager(object):
         raise errors.IncompatibleHardwareMethodError
 
     def get_bmc_address(self):
+        raise errors.IncompatibleHardwareMethodError()
+
+    def get_bmc_v6address(self):
         raise errors.IncompatibleHardwareMethodError()
 
     def get_boot_info(self):
@@ -459,6 +498,7 @@ class HardwareManager(object):
         hardware_info['disks'] = self.list_block_devices()
         hardware_info['memory'] = self.get_memory()
         hardware_info['bmc_address'] = self.get_bmc_address()
+        hardware_info['bmc_v6address'] = self.get_bmc_v6address()
         hardware_info['system_vendor'] = self.get_system_vendor_info()
         hardware_info['boot'] = self.get_boot_info()
         return hardware_info
@@ -469,6 +509,8 @@ class HardwareManager(object):
         Returns a list of steps. Each step is represented by a dict::
 
           {
+           'interface': the name of the driver interface that should execute
+                        the step.
            'step': the HardwareManager function to call.
            'priority': the order steps will be run in. Ironic will sort all
                        the clean steps from all the drivers, with the largest
@@ -723,18 +765,26 @@ class GenericHardwareManager(HardwareManager):
             for sys_child in sys_dict['children']:
                 if sys_child['id'] == 'core':
                     for core_child in sys_child['children']:
-                        if core_child['id'] == 'memory':
-                            if core_child.get('size'):
-                                value = "%(size)s %(units)s" % core_child
-                                physical += int(UNIT_CONVERTER(value).to(
-                                    'MB').magnitude)
+                        if _MEMORY_ID_RE.match(core_child['id']):
+                            for bank in core_child.get('children', ()):
+                                if bank.get('size'):
+                                    value = ("%(size)s %(units)s" % bank)
+                                    physical += int(UNIT_CONVERTER(value).to
+                                                    ('MB').magnitude)
+
             if not physical:
                 LOG.warning('Did not find any physical RAM')
 
         return Memory(total=total, physical_mb=physical)
 
-    def list_block_devices(self):
-        return list_all_block_devices()
+    def list_block_devices(self, include_partitions=False):
+        block_devices = list_all_block_devices()
+        if include_partitions:
+            block_devices.extend(
+                list_all_block_devices(block_type='part',
+                                       ignore_raid=True)
+            )
+        return block_devices
 
     def get_os_install_device(self):
         cached_node = get_cached_node()
@@ -837,7 +887,11 @@ class GenericHardwareManager(HardwareManager):
         :raises BlockDeviceEraseError: when there's an error erasing the
                 block device
         """
-        block_devices = self.list_block_devices()
+        block_devices = self.list_block_devices(include_partitions=True)
+        # NOTE(coreywright): Reverse sort by device name so a partition (eg
+        # sda1) is processed before it disappears when its associated disk (eg
+        # sda) has its partition table erased and the kernel notified.
+        block_devices.sort(key=lambda dev: dev.name, reverse=True)
         erase_errors = {}
         for dev in block_devices:
             if self._is_virtual_media_device(dev):
@@ -1092,6 +1146,76 @@ class GenericHardwareManager(HardwareManager):
 
         return '0.0.0.0'
 
+    def get_bmc_v6address(self):
+        """Attempt to detect BMC v6 address
+
+        :return: IPv6 address of lan channel or ::/0 in case none of them is
+                 configured properly. May return None value if it cannot
+                 interract with system tools or critical error occurs.
+        """
+        # These modules are rarely loaded automatically
+        utils.try_execute('modprobe', 'ipmi_msghandler')
+        utils.try_execute('modprobe', 'ipmi_devintf')
+        utils.try_execute('modprobe', 'ipmi_si')
+
+        null_address_re = re.compile(r'^::(/\d{1,3})*$')
+
+        def get_addr(channel, dynamic=False):
+            cmd = "ipmitool lan6 print {} {}_addr".format(
+                channel, 'dynamic' if dynamic else 'static')
+            try:
+                out, e = utils.execute(cmd, shell=True)
+            except processutils.ProcessExecutionError:
+                return
+
+            # NOTE: More likely ipmitool was not intended to return
+            #       stdout in yaml format. Fortunately, output of
+            #       dynamic_addr and static_addr commands is a valid yaml.
+            try:
+                out = yaml.safe_load(out.strip())
+            except yaml.YAMLError as e:
+                LOG.warning('Cannot process output of "%(cmd)s" '
+                            'command: %(e)s', {'cmd': cmd, 'e': e})
+                return
+
+            for addr_dict in out.values():
+                address = addr_dict['Address']
+                if dynamic:
+                    enabled = addr_dict['Source/Type'] in ['DHCPv6', 'SLAAC']
+                else:
+                    enabled = addr_dict['Enabled']
+
+                if addr_dict['Status'] == 'active' and enabled \
+                        and not null_address_re.match(address):
+                    return address
+
+        try:
+            # From all the channels 0-15, only 1-7 can be assigned to different
+            # types of communication media and protocols and effectively used
+            for channel in range(1, 8):
+                addr_mode, e = utils.execute(
+                    r"ipmitool lan6 print {} enables | "
+                    r"awk '/IPv6\/IPv4 Addressing Enables[ \t]*:/"
+                    r"{{print $NF}}'".format(channel), shell=True)
+                if addr_mode.strip() not in ['ipv6', 'both']:
+                    continue
+
+                address = get_addr(channel, dynamic=True) or get_addr(channel)
+                if not address:
+                    continue
+
+                try:
+                    return str(netaddr.IPNetwork(address).ip)
+                except netaddr.AddrFormatError:
+                    LOG.warning('Invalid IP address: %s', address)
+                    continue
+        except (processutils.ProcessExecutionError, OSError) as e:
+            # Not error, because it's normal in virtual environment
+            LOG.warning("Cannot get BMC v6 address: %s", e)
+            return
+
+        return '::/0'
+
     def get_clean_steps(self, node, ports):
         return [
             {
@@ -1169,8 +1293,8 @@ def dispatch_to_all_managers(method, *args, **kwargs):
     {HardwareManagerClassName: response}.
 
     :param method: hardware manager method to dispatch
-    :param *args: arguments to dispatched method
-    :param **kwargs: keyword arguments to dispatched method
+    :param args: arguments to dispatched method
+    :param kwargs: keyword arguments to dispatched method
     :raises errors.HardwareManagerMethodNotFound: if all managers raise
         IncompatibleHardwareMethodError.
     :returns: a dictionary with keys for each hardware manager that returns
@@ -1213,8 +1337,8 @@ def dispatch_to_managers(method, *args, **kwargs):
     any result without raising an IncompatibleHardwareMethodError.
 
     :param method: hardware manager method to dispatch
-    :param *args: arguments to dispatched method
-    :param **kwargs: keyword arguments to dispatched method
+    :param args: arguments to dispatched method
+    :param kwargs: keyword arguments to dispatched method
 
     :returns: result of successful dispatch of method
     :raises HardwareManagerMethodNotFound: if all managers failed the method

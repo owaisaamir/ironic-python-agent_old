@@ -156,7 +156,7 @@ building a custom image can be found at [3]_.
 
 This essentially boils down to the following steps:
 
-#. ``git clone https://git.openstack.org/openstack/ironic-python-agent``
+#. ``git clone https://opendev.org/openstack/ironic-python-agent``
 #. ``cd ironic-python-agent``
 #. ``pip install -r ./requirements.txt``
 #. If not installed, please install the docker container engine. [5]_
@@ -205,8 +205,8 @@ If the system uses systemd then systemctl can be used to restart the service::
 
 References
 ==========
-.. [0] `Dynamic-login DIB element`: https://github.com/openstack/diskimage-builder/tree/master/elements/dynamic-login
-.. [1] `DevUser DIB element`: https://github.com/openstack/diskimage-builder/tree/master/elements/devuser
+.. [0] `Dynamic-login DIB element`: https://github.com/openstack/diskimage-builder/tree/master/diskimage_builder/elements/dynamic-login
+.. [1] `DevUser DIB element`: https://github.com/openstack/diskimage-builder/tree/master/diskimage_builder/elements/devuser
 .. [2] `Add User to CoreOS`: https://coreos.com/os/docs/latest/adding-users.html
 .. [3] `IPA image build reference`: https://github.com/openstack/ironic-python-agent/tree/master/imagebuild/coreos/README.rst
 .. [4] `Booting CoreOS via PXE`: https://coreos.com/os/docs/latest/booting-with-pxe.html

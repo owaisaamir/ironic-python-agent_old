@@ -9,6 +9,7 @@ TINYCORE_MIRROR_URL=${TINYCORE_MIRROR_URL:-}
 TINYIPA_REQUIRE_BIOSDEVNAME=${TINYIPA_REQUIRE_BIOSDEVNAME:-false}
 TINYIPA_REQUIRE_IPMITOOL=${TINYIPA_REQUIRE_IPMITOOL:-true}
 IRONIC_LIB_SOURCE=${IRONIC_LIB_SOURCE:-}
+USE_PYTHON3=${USE_PYTHON3:-True}
 
 CHROOT_PATH="/tmp/overides:/usr/local/sbin:/usr/local/bin:/apps/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CHROOT_CMD="sudo chroot $BUILDDIR /usr/bin/env -i PATH=$CHROOT_PATH http_proxy=$http_proxy https_proxy=$https_proxy no_proxy=$no_proxy"
@@ -40,8 +41,8 @@ fi
 choose_tc_mirror
 
 cd $WORKDIR/build_files
-wget -N $TINYCORE_MIRROR_URL/7.x/x86_64/release/distribution_files/corepure64.gz
-wget -N $TINYCORE_MIRROR_URL/7.x/x86_64/release/distribution_files/vmlinuz64
+wget -N $TINYCORE_MIRROR_URL/8.x/x86_64/release/distribution_files/corepure64.gz
+wget -N $TINYCORE_MIRROR_URL/8.x/x86_64/release/distribution_files/vmlinuz64
 cd $WORKDIR
 
 ########################################################
@@ -56,9 +57,6 @@ mkdir "$BUILDDIR"
 
 # Configure mirror
 sudo sh -c "echo $TINYCORE_MIRROR_URL > $BUILDDIR/opt/tcemirror"
-
-# Download get-pip into ramdisk
-( cd "$BUILDDIR/tmp" && wget https://bootstrap.pypa.io/get-pip.py )
 
 # Download TGT, Qemu-utils, Biosdevname and IPMItool source
 clone_and_checkout "https://github.com/fujita/tgt.git" "${BUILDDIR}/tmp/tgt" "v1.0.62"
@@ -77,7 +75,9 @@ mkdir -p "$BUILDDIR/tmp/localpip"
 # Download IPA and requirements
 cd ../..
 rm -rf *.egg-info
+pwd
 python setup.py sdist --dist-dir "$BUILDDIR/tmp/localpip" --quiet
+ls $BUILDDIR/tmp/localpip || true
 cp requirements.txt $BUILDDIR/tmp/ipa-requirements.txt
 
 if [ -n "$IRONIC_LIB_SOURCE" ]; then
@@ -104,12 +104,20 @@ sudo mount --bind /proc $BUILDDIR/proc
 sudo mount --bind /dev/pts $BUILDDIR/dev/pts
 
 if [ -d /opt/stack/new ]; then
+    CI_DIR=/opt/stack/new
+elif [ -d /opt/stack ]; then
+    CI_DIR=/opt/stack
+else
+    CI_DIR=
+fi
+
+if [ -n "$CI_DIR" ]; then
     # Running in CI environment, make checkouts available
-    $CHROOT_CMD mkdir -p /opt/stack/new
-    for project in $(ls /opt/stack/new); do
+    $CHROOT_CMD mkdir -p $CI_DIR
+    for project in $(ls $CI_DIR); do
         if grep -q "$project" $BUILDDIR/tmp/upper-constraints.txt &&
-            [ -d "/opt/stack/new/$project/.git" ]; then
-            sudo cp -R "/opt/stack/new/$project" $BUILDDIR/opt/stack/new/
+            [ -d "$CI_DIR/$project/.git" ]; then
+            sudo cp -R "$CI_DIR/$project" $BUILDDIR/$CI_DIR/
         fi
     done
 fi
@@ -122,21 +130,32 @@ $CHROOT_CMD chmod a+rwx /etc/sysconfig/tcuser
 mkdir $BUILDDIR/tmp/overides
 cp $WORKDIR/build_files/fakeuname $BUILDDIR/tmp/overides/uname
 
+PY_REQS="buildreqs_python2.lst"
+if [[ $USE_PYTHON3 == "True" ]]; then
+    PY_REQS="buildreqs_python3.lst"
+fi
+
 while read line; do
     sudo chroot --userspec=$TC:$STAFF $BUILDDIR /usr/bin/env -i PATH=$CHROOT_PATH http_proxy=$http_proxy https_proxy=$https_proxy no_proxy=$no_proxy tce-load -wci $line
-done < $WORKDIR/build_files/buildreqs.lst
+done < <(paste $WORKDIR/build_files/$PY_REQS $WORKDIR/build_files/buildreqs.lst)
+
+PIP_COMMAND="pip"
+TINYIPA_PYTHON_EXE="python"
+if [[ $USE_PYTHON3 == "True" ]]; then
+    PIP_COMMAND="pip3"
+    TINYIPA_PYTHON_EXE="python3"
+fi
 
 # Build python wheels
-$CHROOT_CMD python /tmp/get-pip.py
-$CHROOT_CMD pip install pbr
-$CHROOT_CMD pip wheel -c /tmp/upper-constraints.txt --wheel-dir /tmp/wheels setuptools
-$CHROOT_CMD pip wheel -c /tmp/upper-constraints.txt --wheel-dir /tmp/wheels pip
-$CHROOT_CMD pip wheel -c /tmp/upper-constraints.txt --wheel-dir /tmp/wheels -r /tmp/ipa-requirements.txt
+$CHROOT_CMD ${TINYIPA_PYTHON_EXE} -m ensurepip
+$CHROOT_CMD ${PIP_COMMAND} install --upgrade pip wheel
+$CHROOT_CMD ${PIP_COMMAND} install pbr
+$CHROOT_CMD ${PIP_COMMAND} wheel -c /tmp/upper-constraints.txt --wheel-dir /tmp/wheels -r /tmp/ipa-requirements.txt
 if [ -n "$IRONIC_LIB_SOURCE" ]; then
-    $CHROOT_CMD pip wheel -c /tmp/upper-constraints.txt --wheel-dir /tmp/wheels -r /tmp/ironic-lib-requirements.txt
-    $CHROOT_CMD pip wheel -c /tmp/upper-constraints.txt --no-index --pre --wheel-dir /tmp/wheels --find-links=/tmp/localpip --find-links=/tmp/wheels ironic-lib
+    $CHROOT_CMD ${PIP_COMMAND} wheel -c /tmp/upper-constraints.txt --wheel-dir /tmp/wheels -r /tmp/ironic-lib-requirements.txt
+    $CHROOT_CMD ${PIP_COMMAND} wheel -c /tmp/upper-constraints.txt --no-index --pre --wheel-dir /tmp/wheels --find-links=/tmp/localpip --find-links=/tmp/wheels ironic-lib
 fi
-$CHROOT_CMD pip wheel -c /tmp/upper-constraints.txt --no-index --pre --wheel-dir /tmp/wheels --find-links=/tmp/localpip --find-links=/tmp/wheels ironic-python-agent
+$CHROOT_CMD ${PIP_COMMAND} wheel -c /tmp/upper-constraints.txt --no-index --pre --wheel-dir /tmp/wheels --find-links=/tmp/localpip --find-links=/tmp/wheels ironic-python-agent
 echo Resulting wheels:
 ls -1 $BUILDDIR/tmp/wheels
 

@@ -17,11 +17,13 @@ import os
 import time
 
 from ironic_lib import disk_utils
+from ironic_lib import exception
 from oslo_concurrency import processutils
 from oslo_config import cfg
 from oslo_log import log
 import requests
 import six
+from six.moves.urllib import parse as urlparse
 
 from ironic_python_agent import errors
 from ironic_python_agent.extensions import base
@@ -53,10 +55,65 @@ def _path_to_script(script):
     return os.path.join(cwd, '..', script)
 
 
+def _download_with_proxy(image_info, url, image_id):
+    """Opens a download stream for the given URL.
+
+    :param image_info: Image information dictionary.
+    :param url: The URL string to request the image from.
+    :param image_id: Image ID or URL for logging.
+
+    :raises: ImageDownloadError if the download stream was not started
+             properly.
+    """
+    no_proxy = image_info.get('no_proxy')
+    if no_proxy:
+        os.environ['no_proxy'] = no_proxy
+    proxies = image_info.get('proxies', {})
+    verify, cert = utils.get_ssl_client_options(CONF)
+    resp = requests.get(url, stream=True, proxies=proxies,
+                        verify=verify, cert=cert)
+    if resp.status_code != 200:
+        msg = ('Received status code {} from {}, expected 200. Response '
+               'body: {}').format(resp.status_code, url, resp.text)
+        raise errors.ImageDownloadError(image_id, msg)
+    return resp
+
+
+def _fetch_checksum(checksum, image_info):
+    """Fetch checksum from remote location, if needed."""
+    if not (checksum.startswith('http://') or checksum.startswith('https://')):
+        # Not a remote checksum, return as it is.
+        return checksum
+
+    LOG.debug('Downloading checksums file from %s', checksum)
+    resp = _download_with_proxy(image_info, checksum, checksum).text
+    lines = [line.strip() for line in resp.split('\n') if line.strip()]
+    if not lines:
+        raise errors.ImageDownloadError(checksum, "Empty checksum file")
+    elif len(lines) == 1:
+        # Special case - checksums file with only the checksum itself
+        if ' ' not in lines[0]:
+            return lines[0]
+
+    # FIXME(dtantsur): can we assume the same name for all images?
+    expected_fname = os.path.basename(
+        urlparse.urlparse(image_info['urls'][0]).path)
+    for line in lines:
+        checksum, fname = line.strip().split(None, 1)
+        # The star symbol designates binary mode, which is the same as text
+        # mode on GNU systems.
+        if fname.strip().lstrip('*') == expected_fname:
+            return checksum.strip()
+
+    raise errors.ImageDownloadError(
+        checksum, "Checksum file does not contain name %s" % expected_fname)
+
+
 def _write_partition_image(image, image_info, device):
     """Call disk_util to create partition and write the partition image.
 
     :param image: Local path to image file to be written to the partition.
+        If ``None``, the image is not populated.
     :param image_info: Image information dictionary.
     :param device: The device name, as a string, on which to store the image.
                    Example: '/dev/sda'
@@ -71,16 +128,18 @@ def _write_partition_image(image, image_info, device):
     boot_option = image_info.get('boot_option', 'netboot')
     boot_mode = image_info.get('deploy_boot_mode', 'bios')
     disk_label = image_info.get('disk_label', 'msdos')
-    image_mb = disk_utils.get_image_mb(image)
     root_mb = image_info['root_mb']
 
     cpu_arch = hardware.dispatch_to_managers('get_cpus').architecture
 
-    if image_mb > int(root_mb):
-        msg = ('Root partition is too small for requested image. Image '
-               'virtual size: {} MB, Root size: {} MB').format(image_mb,
-                                                               root_mb)
-        raise errors.InvalidCommandParamsError(msg)
+    if image is not None:
+        image_mb = disk_utils.get_image_mb(image)
+        if image_mb > int(root_mb):
+            msg = ('Root partition is too small for requested image. Image '
+                   'virtual size: {} MB, Root size: {} MB').format(image_mb,
+                                                                   root_mb)
+            raise errors.InvalidCommandParamsError(msg)
+
     try:
         return disk_utils.work_on_disk(device, root_mb,
                                        image_info['swap_mb'],
@@ -213,11 +272,15 @@ class ImageDownload(object):
             self._hash_algo = hashlib.md5()
             self._expected_hash_value = image_info['checksum']
 
+        self._expected_hash_value = _fetch_checksum(self._expected_hash_value,
+                                                    image_info)
+
         details = []
         for url in image_info['urls']:
             try:
                 LOG.info("Attempting to download image from {}".format(url))
-                self._request = self._download_file(image_info, url)
+                self._request = _download_with_proxy(image_info, url,
+                                                     image_info['id'])
             except errors.ImageDownloadError as e:
                 failtime = time.time() - self._time
                 log_msg = ('URL: {}; time: {} '
@@ -231,28 +294,6 @@ class ImageDownload(object):
         else:
             details = '\n '.join(details)
             raise errors.ImageDownloadError(image_info['id'], details)
-
-    def _download_file(self, image_info, url):
-        """Opens a download stream for the given URL.
-
-        :param image_info: Image information dictionary.
-        :param url: The URL string to request the image from.
-
-        :raises: ImageDownloadError if the download stream was not started
-                 properly.
-        """
-        no_proxy = image_info.get('no_proxy')
-        if no_proxy:
-            os.environ['no_proxy'] = no_proxy
-        proxies = image_info.get('proxies', {})
-        verify, cert = utils.get_ssl_client_options(CONF)
-        resp = requests.get(url, stream=True, proxies=proxies,
-                            verify=verify, cert=cert)
-        if resp.status_code != 200:
-            msg = ('Received status code {} from {}, expected 200. Response '
-                   'body: {}').format(resp.status_code, url, resp.text)
-            raise errors.ImageDownloadError(image_info['id'], msg)
-        return resp
 
     def __iter__(self):
         """Downloads and returns the next chunk of the image.
@@ -354,6 +395,40 @@ def _validate_image_info(ext, image_info=None, **kwargs):
                 not os_hash_value):
             raise errors.InvalidCommandParamsError(
                 'Image \'os_hash_value\' must be a non-empty string.')
+
+
+def _validate_partitioning(device):
+    """Validate the final partition table.
+
+    Check if after writing the image to disk we have a valid partition
+    table by trying to read it. This will fail if the disk is junk.
+    """
+    try:
+        # Ensure we re-read the partition table before we try to list
+        # partitions
+        utils.execute('partprobe', device, run_as_root=True,
+                      attempts=CONF.disk_utils.partprobe_attempts)
+    except (processutils.UnknownArgumentError,
+            processutils.ProcessExecutionError, OSError) as e:
+        LOG.warning("Unable to probe for partitions on device %(device)s "
+                    "after writing the image, the partitioning table may "
+                    "be broken. Error: %(error)s",
+                    {'device': device, 'error': e})
+
+    try:
+        nparts = len(disk_utils.list_partitions(device))
+    except (processutils.UnknownArgumentError,
+            processutils.ProcessExecutionError, OSError) as e:
+        msg = ("Unable to find a valid partition table on the disk after "
+               "writing the image. Error {}".format(e))
+        raise exception.InstanceDeployFailure(msg)
+
+    # Check if there is at least one partition in the partition table after
+    # deploy
+    if not nparts:
+        msg = ("No partitions found on the device {} after writing "
+               "the image.".format(device))
+        raise exception.InstanceDeployFailure(msg)
 
 
 class StandbyExtension(base.BaseAgentExtension):
@@ -479,11 +554,20 @@ class StandbyExtension(base.BaseAgentExtension):
                 LOG.debug('Already had %s cached, overwriting',
                           self.cached_image_id)
 
-            if (stream_raw_images and disk_format == 'raw'
-                    and image_info.get('image_type') != 'partition'):
-                self._stream_raw_image_onto_device(image_info, device)
+            if stream_raw_images and disk_format == 'raw':
+                if image_info.get('image_type') == 'partition':
+                    self.partition_uuids = _write_partition_image(None,
+                                                                  image_info,
+                                                                  device)
+                    stream_to = self.partition_uuids['partitions']['root']
+                else:
+                    stream_to = device
+
+                self._stream_raw_image_onto_device(image_info, stream_to)
             else:
                 self._cache_and_write_image(image_info, device)
+
+        # _validate_partitioning(device)
 
         # the configdrive creation is taken care by ironic-lib's
         # work_on_disk().

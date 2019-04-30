@@ -156,6 +156,32 @@ BLK_DEVICE_TEMPLATE_SMALL_DEVICES = [
                          vendor="FooTastic"),
 ]
 
+# NOTE(TheJulia): This list intentionally contains duplicates
+# as the code filters them out by kernel device name.
+RAID_BLK_DEVICE_TEMPLATE = (
+    'KNAME="sda" MODEL="DRIVE 0" SIZE="1765517033472" '
+    'ROTA="1" TYPE="disk"\n'
+    'KNAME="sdb" MODEL="DRIVE 1" SIZE="1765517033472" '
+    'ROTA="1" TYPE="disk"\n'
+    'KNAME="sdb" MODEL="DRIVE 1" SIZE="1765517033472" '
+    'ROTA="1" TYPE="disk"\n'
+    'KNAME="md0" MODEL="RAID" SIZE="1765517033470" '
+    'ROTA="0" TYPE="raid1"\n'
+    'KNAME="md0" MODEL="RAID" SIZE="1765517033470" '
+    'ROTA="0" TYPE="raid1"'
+)
+RAID_BLK_DEVICE_TEMPLATE_DEVICES = [
+    hardware.BlockDevice(name='/dev/sda', model='DRIVE 0',
+                         size=1765517033472, rotational=True,
+                         vendor="FooTastic"),
+    hardware.BlockDevice(name='/dev/sdb', model='DRIVE 1',
+                         size=1765517033472, rotational=True,
+                         vendor="FooTastic"),
+    hardware.BlockDevice(name='/dev/md0', model='RAID',
+                         size=1765517033470, rotational=False,
+                         vendor="FooTastic"),
+]
+
 SHRED_OUTPUT_0_ITERATIONS_ZERO_FALSE = ()
 
 SHRED_OUTPUT_1_ITERATION_ZERO_TRUE = (
@@ -242,7 +268,7 @@ CPUINFO_FLAGS_OUTPUT = """
 flags           : fpu vme de pse
 """
 
-LSHW_JSON_OUTPUT = ("""
+LSHW_JSON_OUTPUT_V1 = ("""
 {
   "id": "fuzzypickles",
   "product": "ABC123 (GENERIC_SERVER)",
@@ -351,6 +377,194 @@ LSHW_JSON_OUTPUT = ("""
 }
 """, "")
 
+LSHW_JSON_OUTPUT_V2 = ("""
+{
+  "id" : "bumblebee",
+  "class" : "system",
+  "claimed" : true,
+  "handle" : "DMI:0001",
+  "description" : "Rack Mount Chassis",
+  "product" : "ABCD",
+  "vendor" : "ABCD",
+  "version" : "1234",
+  "serial" : "1234",
+  "width" : 64,
+  "configuration" : {
+    "boot" : "normal",
+    "chassis" : "rackmount",
+    "family" : "Intel Grantley EP",
+    "sku" : "NULL",
+    "uuid" : "00010002-0003-0004-0005-000600070008"
+  },
+  "capabilities" : {
+    "smbios-2.8" : "SMBIOS version 2.8",
+    "dmi-2.7" : "DMI version 2.7",
+    "vsyscall32" : "32-bit processes"
+  },
+  "children" : [
+    {
+      "id" : "core",
+      "class" : "bus",
+      "claimed" : true,
+      "handle" : "DMI:0002",
+      "description" : "Motherboard",
+      "product" : "ABCD",
+      "vendor" : "ABCD",
+      "physid" : "0",
+      "version" : "1234",
+      "serial" : "1234",
+      "slot" : "NULL",
+      "children" : [
+        {
+          "id" : "memory:0",
+          "class" : "memory",
+          "claimed" : true,
+          "handle" : "DMI:004A",
+          "description" : "System Memory",
+          "physid" : "4a",
+          "slot" : "System board or motherboard",
+          "children" : [
+            {
+              "id" : "bank:0",
+              "class" : "memory",
+              "claimed" : true,
+              "handle" : "DMI:004C",
+              "description" : "DIMM Synchronous 2133 MHz (0.5 ns)",
+              "product" : "36ASF2G72PZ-2G1A2",
+              "vendor" : "Micron",
+              "physid" : "0",
+              "serial" : "101B6543",
+              "slot" : "DIMM_A0",
+              "units" : "bytes",
+              "size" : 17179869184,
+              "width" : 64,
+              "clock" : 2133000000
+            },
+            {
+              "id" : "bank:1",
+              "class" : "memory",
+              "claimed" : true,
+              "handle" : "DMI:004E",
+              "description" : "DIMM Synchronous [empty]",
+              "product" : "NO DIMM",
+              "vendor" : "NO DIMM",
+              "physid" : "1",
+              "serial" : "NO DIMM",
+              "slot" : "DIMM_A1"
+            },
+            {
+              "id" : "bank:2",
+              "class" : "memory",
+              "claimed" : true,
+              "handle" : "DMI:004F",
+              "description" : "DIMM Synchronous 2133 MHz (0.5 ns)",
+              "product" : "36ASF2G72PZ-2G1A2",
+              "vendor" : "Micron",
+              "physid" : "2",
+              "serial" : "101B654E",
+              "slot" : "DIMM_A2",
+              "units" : "bytes",
+              "size" : 17179869184,
+              "width" : 64,
+              "clock" : 2133000000
+            },
+            {
+              "id" : "bank:3",
+              "class" : "memory",
+              "claimed" : true,
+              "handle" : "DMI:0051",
+              "description" : "DIMM Synchronous [empty]",
+              "product" : "NO DIMM",
+              "vendor" : "NO DIMM",
+              "physid" : "3",
+              "serial" : "NO DIMM",
+              "slot" : "DIMM_A3"
+            }
+          ]
+        },
+        {
+          "id" : "memory:1",
+          "class" : "memory",
+          "claimed" : true,
+          "handle" : "DMI:0052",
+          "description" : "System Memory",
+          "physid" : "52",
+          "slot" : "System board or motherboard",
+          "children" : [
+            {
+              "id" : "bank:0",
+              "class" : "memory",
+              "claimed" : true,
+              "handle" : "DMI:0054",
+              "description" : "DIMM Synchronous 2133 MHz (0.5 ns)",
+              "product" : "36ASF2G72PZ-2G1A2",
+              "vendor" : "Micron",
+              "physid" : "0",
+              "serial" : "101B6545",
+              "slot" : "DIMM_A4",
+              "units" : "bytes",
+              "size" : 17179869184,
+              "width" : 64,
+              "clock" : 2133000000
+            },
+            {
+              "id" : "bank:1",
+              "class" : "memory",
+              "claimed" : true,
+              "handle" : "DMI:0056",
+              "description" : "DIMM Synchronous [empty]",
+              "product" : "NO DIMM",
+              "vendor" : "NO DIMM",
+              "physid" : "1",
+              "serial" : "NO DIMM",
+              "slot" : "DIMM_A5"
+            },
+            {
+              "id" : "bank:2",
+              "class" : "memory",
+              "claimed" : true,
+              "handle" : "DMI:0057",
+              "description" : "DIMM Synchronous 2133 MHz (0.5 ns)",
+              "product" : "36ASF2G72PZ-2G1A2",
+              "vendor" : "Micron",
+              "physid" : "2",
+              "serial" : "101B6540",
+              "slot" : "DIMM_A6",
+              "units" : "bytes",
+              "size" : 17179869184,
+              "width" : 64,
+              "clock" : 2133000000
+            },
+            {
+              "id" : "bank:3",
+              "class" : "memory",
+              "claimed" : true,
+              "handle" : "DMI:0059",
+              "description" : "DIMM Synchronous [empty]",
+              "product" : "NO DIMM",
+              "vendor" : "NO DIMM",
+              "physid" : "3",
+              "serial" : "NO DIMM",
+              "slot" : "DIMM_A7"
+            }
+          ]
+        },
+        {
+          "id" : "memory:4",
+          "class" : "memory",
+          "physid" : "1"
+        },
+        {
+          "id" : "memory:5",
+          "class" : "memory",
+          "physid" : "2"
+        }
+      ]
+    }
+  ]
+}
+""", "")
+
 SMARTCTL_NORMAL_OUTPUT = ("""
 smartctl 6.2 2017-02-27 r4394 [x86_64-linux-3.10.0-693.21.1.el7.x86_64] (local build)
 Copyright (C) 2002-13, Bruce Allen, Christian Franke, www.smartmontools.org
@@ -364,6 +578,37 @@ Copyright (C) 2002-13, Bruce Allen, Christian Franke, www.smartmontools.org
 
 ATA Security is:  Unavailable
 """)  # noqa
+
+
+IPMITOOL_LAN6_PRINT_DYNAMIC_ADDR = """
+IPv6 Dynamic Address 0:
+    Source/Type:    DHCPv6
+    Address:        2001:1234:1234:1234:1234:1234:1234:1234/64
+    Status:         active
+IPv6 Dynamic Address 1:
+    Source/Type:    DHCPv6
+    Address:        ::/0
+    Status:         active
+IPv6 Dynamic Address 2:
+    Source/Type:    DHCPv6
+    Address:        ::/0
+    Status:         active
+"""
+
+IPMITOOL_LAN6_PRINT_STATIC_ADDR = """
+IPv6 Static Address 0:
+    Enabled:        yes
+    Address:        2001:5678:5678:5678:5678:5678:5678:5678/64
+    Status:         active
+IPv6 Static Address 1:
+    Enabled:        no
+    Address:        ::/0
+    Status:         disabled
+IPv6 Static Address 2:
+    Enabled:        no
+    Address:        ::/0
+    Status:         disabled
+"""
 
 
 class FakeHardwareManager(hardware.GenericHardwareManager):
@@ -815,7 +1060,29 @@ class TestGenericHardwareManager(base.IronicAgentTest):
         mocked_execute.return_value = (BLK_DEVICE_TEMPLATE, '')
         self.assertEqual('/dev/sdb', self.hardware.get_os_install_device())
         mocked_execute.assert_called_once_with(
-            'lsblk', '-Pbdi', '-oKNAME,MODEL,SIZE,ROTA,TYPE',
+            'lsblk', '-Pbi', '-oKNAME,MODEL,SIZE,ROTA,TYPE',
+            check_exit_code=[0])
+        mock_cached_node.assert_called_once_with()
+
+    @mock.patch.object(os, 'readlink', autospec=True)
+    @mock.patch.object(os, 'listdir', autospec=True)
+    @mock.patch.object(hardware, 'get_cached_node', autospec=True)
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_os_install_device_raid(self, mocked_execute,
+                                        mock_cached_node, mocked_listdir,
+                                        mocked_readlink):
+        # NOTE(TheJulia): The readlink and listdir mocks are just to satisfy
+        # what is functionally an available path check and that information
+        # is stored in the returned result for use by root device hints.
+        mocked_readlink.side_effect = '../../sda'
+        mocked_listdir.return_value = ['1:0:0:0']
+        mock_cached_node.return_value = None
+        mocked_execute.return_value = (RAID_BLK_DEVICE_TEMPLATE, '')
+        # This should ideally select the smallest device and in theory raid
+        # should always be smaller
+        self.assertEqual('/dev/md0', self.hardware.get_os_install_device())
+        mocked_execute.assert_called_once_with(
+            'lsblk', '-Pbi', '-oKNAME,MODEL,SIZE,ROTA,TYPE',
             check_exit_code=[0])
         mock_cached_node.assert_called_once_with()
 
@@ -834,7 +1101,7 @@ class TestGenericHardwareManager(base.IronicAgentTest):
         ex = self.assertRaises(errors.DeviceNotFound,
                                self.hardware.get_os_install_device)
         mocked_execute.assert_called_once_with(
-            'lsblk', '-Pbdi', '-oKNAME,MODEL,SIZE,ROTA,TYPE',
+            'lsblk', '-Pbi', '-oKNAME,MODEL,SIZE,ROTA,TYPE',
             check_exit_code=[0])
         self.assertIn(str(4 * units.Gi), ex.details)
         mock_cached_node.assert_called_once_with()
@@ -1022,9 +1289,9 @@ class TestGenericHardwareManager(base.IronicAgentTest):
 
     @mock.patch('psutil.virtual_memory', autospec=True)
     @mock.patch.object(utils, 'execute', autospec=True)
-    def test_get_memory_psutil(self, mocked_execute, mocked_psutil):
+    def test_get_memory_psutil_v1(self, mocked_execute, mocked_psutil):
         mocked_psutil.return_value.total = 3952 * 1024 * 1024
-        mocked_execute.return_value = LSHW_JSON_OUTPUT
+        mocked_execute.return_value = LSHW_JSON_OUTPUT_V1
         mem = self.hardware.get_memory()
 
         self.assertEqual(3952 * 1024 * 1024, mem.total)
@@ -1032,13 +1299,35 @@ class TestGenericHardwareManager(base.IronicAgentTest):
 
     @mock.patch('psutil.virtual_memory', autospec=True)
     @mock.patch.object(utils, 'execute', autospec=True)
-    def test_get_memory_psutil_exception(self, mocked_execute, mocked_psutil):
-        mocked_execute.return_value = LSHW_JSON_OUTPUT
+    def test_get_memory_psutil_v2(self, mocked_execute, mocked_psutil):
+        mocked_psutil.return_value.total = 3952 * 1024 * 1024
+        mocked_execute.return_value = LSHW_JSON_OUTPUT_V2
+        mem = self.hardware.get_memory()
+
+        self.assertEqual(3952 * 1024 * 1024, mem.total)
+        self.assertEqual(65536, mem.physical_mb)
+
+    @mock.patch('psutil.virtual_memory', autospec=True)
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_memory_psutil_exception_v1(self, mocked_execute,
+                                            mocked_psutil):
+        mocked_execute.return_value = LSHW_JSON_OUTPUT_V1
         mocked_psutil.side_effect = AttributeError()
         mem = self.hardware.get_memory()
 
         self.assertIsNone(mem.total)
         self.assertEqual(4096, mem.physical_mb)
+
+    @mock.patch('psutil.virtual_memory', autospec=True)
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_memory_psutil_exception_v2(self, mocked_execute,
+                                            mocked_psutil):
+        mocked_execute.return_value = LSHW_JSON_OUTPUT_V2
+        mocked_psutil.side_effect = AttributeError()
+        mem = self.hardware.get_memory()
+
+        self.assertIsNone(mem.total)
+        self.assertEqual(65536, mem.physical_mb)
 
     @mock.patch('psutil.virtual_memory', autospec=True)
     @mock.patch.object(utils, 'execute', autospec=True)
@@ -1078,6 +1367,7 @@ class TestGenericHardwareManager(base.IronicAgentTest):
             current_boot_mode='bios', pxe_interface='boot:if')
 
         self.hardware.get_bmc_address = mock.Mock()
+        self.hardware.get_bmc_v6address = mock.Mock()
         self.hardware.get_system_vendor_info = mock.Mock()
 
         hardware_info = self.hardware.list_hardware_info()
@@ -1099,6 +1389,19 @@ class TestGenericHardwareManager(base.IronicAgentTest):
         self.assertEqual([device], devices)
 
         list_mock.assert_called_once_with()
+
+    @mock.patch.object(hardware, 'list_all_block_devices', autospec=True)
+    def test_list_block_devices_including_partitions(self, list_mock):
+        device = hardware.BlockDevice('/dev/hdaa', 'small', 65535, False)
+        partition = hardware.BlockDevice('/dev/hdaa1', '', 32767, False)
+        list_mock.side_effect = [[device], [partition]]
+        devices = self.hardware.list_block_devices(include_partitions=True)
+
+        self.assertEqual([device, partition], devices)
+
+        self.assertEqual([mock.call(), mock.call(block_type='part',
+                                                 ignore_raid=True)],
+                         list_mock.call_args_list)
 
     @mock.patch.object(os, 'readlink', autospec=True)
     @mock.patch.object(os, 'listdir', autospec=True)
@@ -1917,18 +2220,24 @@ class TestGenericHardwareManager(base.IronicAgentTest):
         block_devices = [
             hardware.BlockDevice('/dev/sr0', 'vmedia', 12345, True),
             hardware.BlockDevice('/dev/sda', 'small', 65535, False),
+            hardware.BlockDevice('/dev/sda1', '', 32767, False),
         ]
-        mock_list_devs.return_value = block_devices
-        mock__is_vmedia.side_effect = (True, False)
+        # NOTE(coreywright): Don't return the list, but a copy of it, because
+        # we depend on its elements' order when referencing it later during
+        # verification, but the method under test sorts the list changing it.
+        mock_list_devs.return_value = list(block_devices)
+        mock__is_vmedia.side_effect = lambda _, dev: dev.name == '/dev/sr0'
 
         self.hardware.erase_devices_metadata(self.node, [])
-        mock_metadata.assert_called_once_with(
-            '/dev/sda', self.node['uuid'])
-        mock_list_devs.assert_called_once_with(mock.ANY)
-        mock__is_vmedia.assert_has_calls([
-            mock.call(mock.ANY, block_devices[0]),
-            mock.call(mock.ANY, block_devices[1])
-        ])
+        self.assertEqual([mock.call('/dev/sda1', self.node['uuid']),
+                          mock.call('/dev/sda', self.node['uuid'])],
+                         mock_metadata.call_args_list)
+        mock_list_devs.assert_called_once_with(self.hardware,
+                                               include_partitions=True)
+        self.assertEqual([mock.call(self.hardware, block_devices[0]),
+                          mock.call(self.hardware, block_devices[2]),
+                          mock.call(self.hardware, block_devices[1])],
+                         mock__is_vmedia.call_args_list)
 
     @mock.patch.object(hardware.GenericHardwareManager,
                        '_is_virtual_media_device', autospec=True)
@@ -1942,28 +2251,33 @@ class TestGenericHardwareManager(base.IronicAgentTest):
             hardware.BlockDevice('/dev/sdb', 'big', 10737418240, True),
         ]
         mock__is_vmedia.return_value = False
-        mock_list_devs.return_value = block_devices
-        # Simulate /dev/sda failing and /dev/sdb succeeding
+        # NOTE(coreywright): Don't return the list, but a copy of it, because
+        # we depend on its elements' order when referencing it later during
+        # verification, but the method under test sorts the list changing it.
+        mock_list_devs.return_value = list(block_devices)
+        # Simulate first call to destroy_disk_metadata() failing, which is for
+        # /dev/sdb due to erase_devices_metadata() reverse sorting block
+        # devices by name, and second call succeeding, which is for /dev/sda
         error_output = 'Booo00000ooommmmm'
+        error_regex = '(?s)/dev/sdb.*' + error_output
         mock_metadata.side_effect = (
             processutils.ProcessExecutionError(error_output),
             None,
         )
 
-        self.assertRaisesRegex(errors.BlockDeviceEraseError, error_output,
+        self.assertRaisesRegex(errors.BlockDeviceEraseError, error_regex,
                                self.hardware.erase_devices_metadata,
                                self.node, [])
         # Assert all devices are erased independent if one of them
         # failed previously
-        mock_metadata.assert_has_calls([
-            mock.call('/dev/sda', self.node['uuid']),
-            mock.call('/dev/sdb', self.node['uuid']),
-        ])
-        mock_list_devs.assert_called_once_with(mock.ANY)
-        mock__is_vmedia.assert_has_calls([
-            mock.call(mock.ANY, block_devices[0]),
-            mock.call(mock.ANY, block_devices[1])
-        ])
+        self.assertEqual([mock.call('/dev/sdb', self.node['uuid']),
+                          mock.call('/dev/sda', self.node['uuid'])],
+                         mock_metadata.call_args_list)
+        mock_list_devs.assert_called_once_with(self.hardware,
+                                               include_partitions=True)
+        self.assertEqual([mock.call(self.hardware, block_devices[1]),
+                          mock.call(self.hardware, block_devices[0])],
+                         mock__is_vmedia.call_args_list)
 
     @mock.patch.object(utils, 'execute', autospec=True)
     def test_get_bmc_address(self, mocked_execute):
@@ -2013,9 +2327,104 @@ class TestGenericHardwareManager(base.IronicAgentTest):
         mocked_execute.return_value = '', ''
         self.assertEqual('0.0.0.0', self.hardware.get_bmc_address())
 
+    @mock.patch.object(utils, 'try_execute', autospec=True)
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_bmc_v6address_not_enabled(self, mocked_execute, mte):
+        mocked_execute.side_effect = [('ipv4\n', '')] * 7
+        self.assertEqual('::/0', self.hardware.get_bmc_v6address())
+
+    @mock.patch.object(utils, 'try_execute', autospec=True)
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_bmc_v6address_dynamic_address(self, mocked_execute, mte):
+        mocked_execute.side_effect = [
+            ('ipv6\n', ''),
+            (IPMITOOL_LAN6_PRINT_DYNAMIC_ADDR, '')
+        ]
+        self.assertEqual('2001:1234:1234:1234:1234:1234:1234:1234',
+                         self.hardware.get_bmc_v6address())
+
+    @mock.patch.object(utils, 'try_execute', autospec=True)
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_bmc_v6address_static_address_both(self, mocked_execute, mte):
+        dynamic_disabled = \
+            IPMITOOL_LAN6_PRINT_DYNAMIC_ADDR.replace('active', 'disabled')
+        mocked_execute.side_effect = [
+            ('both\n', ''),
+            (dynamic_disabled, ''),
+            (IPMITOOL_LAN6_PRINT_STATIC_ADDR, '')
+        ]
+        self.assertEqual('2001:5678:5678:5678:5678:5678:5678:5678',
+                         self.hardware.get_bmc_v6address())
+
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_bmc_v6address_virt(self, mocked_execute):
+        mocked_execute.side_effect = processutils.ProcessExecutionError()
+        self.assertIsNone(self.hardware.get_bmc_v6address())
+
+    @mock.patch.object(utils, 'try_execute', autospec=True)
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_bmc_v6address_invalid_enables(self, mocked_execute, mte):
+        def side_effect(*args, **kwargs):
+            if args[0].startswith('ipmitool lan6 print'):
+                return '', 'Failed to get IPv6/IPv4 Addressing Enables'
+
+        mocked_execute.side_effect = side_effect
+        self.assertEqual('::/0', self.hardware.get_bmc_v6address())
+
+    @mock.patch.object(utils, 'try_execute', autospec=True)
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_bmc_v6address_invalid_get_address(self, mocked_execute, mte):
+        def side_effect(*args, **kwargs):
+            if args[0].startswith('ipmitool lan6 print'):
+                if args[0].endswith('dynamic_addr') \
+                        or args[0].endswith('static_addr'):
+                    raise processutils.ProcessExecutionError()
+                return 'ipv6', ''
+
+        mocked_execute.side_effect = side_effect
+        self.assertEqual('::/0', self.hardware.get_bmc_v6address())
+
+    @mock.patch.object(hardware, 'LOG', autospec=True)
+    @mock.patch.object(utils, 'try_execute', autospec=True)
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_bmc_v6address_impitool_invalid_stdout_format(
+            self, mocked_execute, mte, mocked_log):
+        def side_effect(*args, **kwargs):
+            if args[0].startswith('ipmitool lan6 print'):
+                if args[0].endswith('dynamic_addr') \
+                        or args[0].endswith('static_addr'):
+                    return 'Invalid\n\tyaml', ''
+                return 'ipv6', ''
+
+        mocked_execute.side_effect = side_effect
+        self.assertEqual('::/0', self.hardware.get_bmc_v6address())
+        one_call = mock.call('Cannot process output of "%(cmd)s" '
+                             'command: %(e)s', mock.ANY)
+        mocked_log.warning.assert_has_calls([one_call] * 14)
+
+    @mock.patch.object(utils, 'try_execute', autospec=True)
+    @mock.patch.object(utils, 'execute', autospec=True)
+    def test_get_bmc_v6address_channel_7(self, mocked_execute, mte):
+        def side_effect(*args, **kwargs):
+            if not args[0].startswith('ipmitool lan6 print 7'):
+                # ipv6 is not enabled for channels 1-6
+                if 'enables |' in args[0]:
+                    return '', ''
+            else:
+                if 'enables |' in args[0]:
+                    return 'ipv6', ''
+                if args[0].endswith('dynamic_addr'):
+                    raise processutils.ProcessExecutionError()
+                elif args[0].endswith('static_addr'):
+                    return IPMITOOL_LAN6_PRINT_STATIC_ADDR, ''
+
+        mocked_execute.side_effect = side_effect
+        self.assertEqual('2001:5678:5678:5678:5678:5678:5678:5678',
+                         self.hardware.get_bmc_v6address())
+
     @mock.patch.object(utils, 'execute', autospec=True)
     def test_get_system_vendor_info(self, mocked_execute):
-        mocked_execute.return_value = LSHW_JSON_OUTPUT
+        mocked_execute.return_value = LSHW_JSON_OUTPUT_V1
         vendor_info = self.hardware.get_system_vendor_info()
         self.assertEqual('ABC123 (GENERIC_SERVER)', vendor_info.product_name)
         self.assertEqual('1234567', vendor_info.serial_number)
@@ -2201,9 +2610,28 @@ class TestModuleFunctions(base.IronicAgentTest):
         mocked_execute.return_value = (BLK_DEVICE_TEMPLATE_SMALL, '')
         result = hardware.list_all_block_devices()
         mocked_execute.assert_called_once_with(
-            'lsblk', '-Pbdi', '-oKNAME,MODEL,SIZE,ROTA,TYPE',
+            'lsblk', '-Pbi', '-oKNAME,MODEL,SIZE,ROTA,TYPE',
             check_exit_code=[0])
         self.assertEqual(BLK_DEVICE_TEMPLATE_SMALL_DEVICES, result)
+        mocked_udev.assert_called_once_with()
+
+    @mock.patch.object(os, 'readlink', autospec=True)
+    @mock.patch.object(hardware, '_get_device_info',
+                       lambda x, y, z: 'FooTastic')
+    @mock.patch.object(hardware, '_udev_settle', autospec=True)
+    @mock.patch.object(hardware.pyudev.Device, "from_device_file",
+                       autospec=False)
+    def test_list_all_block_devices_success_raid(self, mocked_fromdevfile,
+                                                 mocked_udev, mocked_readlink,
+                                                 mocked_execute):
+        mocked_readlink.return_value = '../../sda'
+        mocked_fromdevfile.return_value = {}
+        mocked_execute.return_value = (RAID_BLK_DEVICE_TEMPLATE, '')
+        result = hardware.list_all_block_devices()
+        mocked_execute.assert_called_once_with(
+            'lsblk', '-Pbi', '-oKNAME,MODEL,SIZE,ROTA,TYPE',
+            check_exit_code=[0])
+        self.assertEqual(RAID_BLK_DEVICE_TEMPLATE_DEVICES, result)
         mocked_udev.assert_called_once_with()
 
     @mock.patch.object(hardware, '_get_device_info',
@@ -2214,7 +2642,7 @@ class TestModuleFunctions(base.IronicAgentTest):
         mocked_execute.return_value = ('TYPE="foo" MODEL="model"', '')
         result = hardware.list_all_block_devices()
         mocked_execute.assert_called_once_with(
-            'lsblk', '-Pbdi', '-oKNAME,MODEL,SIZE,ROTA,TYPE',
+            'lsblk', '-Pbi', '-oKNAME,MODEL,SIZE,ROTA,TYPE',
             check_exit_code=[0])
         self.assertEqual([], result)
         mocked_udev.assert_called_once_with()

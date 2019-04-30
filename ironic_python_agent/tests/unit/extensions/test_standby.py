@@ -23,13 +23,11 @@ from ironic_python_agent import hardware
 from ironic_python_agent.tests.unit import base
 
 
-def _build_fake_image_info():
+def _build_fake_image_info(url='http://example.org'):
     return {
         'id': 'fake_id',
         'node_uuid': '1be26c0b-03f2-4d2e-ae87-c02d7f33c123',
-        'urls': [
-            'http://example.org',
-        ],
+        'urls': [url],
         'checksum': 'abc123',
         'image_type': 'whole-disk-image',
     }
@@ -603,6 +601,10 @@ class TestStandbyExtension(base.IronicAgentTest):
 
     @mock.patch('ironic_lib.disk_utils.get_disk_identifier',
                 lambda dev: 'ROOT')
+    @mock.patch('ironic_python_agent.utils.execute',
+                autospec=True)
+    @mock.patch('ironic_lib.disk_utils.list_partitions',
+                autospec=True)
     @mock.patch('ironic_lib.disk_utils.create_config_drive_partition',
                 autospec=True)
     @mock.patch('ironic_python_agent.hardware.dispatch_to_managers',
@@ -615,12 +617,15 @@ class TestStandbyExtension(base.IronicAgentTest):
                            download_mock,
                            write_mock,
                            dispatch_mock,
-                           configdrive_copy_mock):
+                           configdrive_copy_mock,
+                           list_part_mock,
+                           execute_mock):
         image_info = _build_fake_image_info()
         download_mock.return_value = None
         write_mock.return_value = None
         dispatch_mock.return_value = 'manager'
         configdrive_copy_mock.return_value = None
+        list_part_mock.return_value = [mock.MagicMock()]
 
         async_result = self.agent_extension.prepare_image(
             image_info=image_info,
@@ -640,7 +645,14 @@ class TestStandbyExtension(base.IronicAgentTest):
         cmd_result = ('prepare_image: image ({}) written to device {} '
                       'root_uuid=ROOT').format(image_info['id'], 'manager')
         self.assertEqual(cmd_result, async_result.command_result['result'])
+        list_part_mock.assert_called_with('manager')
+        execute_mock.assert_called_with('partprobe', 'manager',
+                                        run_as_root=True,
+                                        attempts=mock.ANY)
 
+    @mock.patch('ironic_python_agent.utils.execute', autospec=True)
+    @mock.patch('ironic_lib.disk_utils.list_partitions',
+                autospec=True)
     @mock.patch('ironic_lib.disk_utils.create_config_drive_partition',
                 autospec=True)
     @mock.patch('ironic_python_agent.hardware.dispatch_to_managers',
@@ -653,12 +665,15 @@ class TestStandbyExtension(base.IronicAgentTest):
                                      download_mock,
                                      write_mock,
                                      dispatch_mock,
-                                     configdrive_copy_mock):
+                                     configdrive_copy_mock,
+                                     list_part_mock,
+                                     execute_mock):
         image_info = _build_fake_partition_image_info()
         download_mock.return_value = None
         write_mock.return_value = {'root uuid': 'root_uuid'}
         dispatch_mock.return_value = 'manager'
         configdrive_copy_mock.return_value = None
+        list_part_mock.return_value = [mock.MagicMock()]
 
         async_result = self.agent_extension.prepare_image(
             image_info=image_info,
@@ -698,10 +713,17 @@ class TestStandbyExtension(base.IronicAgentTest):
                       'root_uuid={}').format(
             image_info['id'], 'manager', 'root_uuid')
         self.assertEqual(cmd_result, async_result.command_result['result'])
+        list_part_mock.assert_called_with('manager')
+        execute_mock.assert_called_with('partprobe', 'manager',
+                                        run_as_root=True,
+                                        attempts=mock.ANY)
 
     @mock.patch('ironic_lib.disk_utils.get_disk_identifier',
                 lambda dev: 'ROOT')
+    @mock.patch('ironic_python_agent.utils.execute', autospec=True)
     @mock.patch('ironic_lib.disk_utils.create_config_drive_partition',
+                autospec=True)
+    @mock.patch('ironic_lib.disk_utils.list_partitions',
                 autospec=True)
     @mock.patch('ironic_python_agent.hardware.dispatch_to_managers',
                 autospec=True)
@@ -713,12 +735,15 @@ class TestStandbyExtension(base.IronicAgentTest):
                                           download_mock,
                                           write_mock,
                                           dispatch_mock,
-                                          configdrive_copy_mock):
+                                          list_part_mock,
+                                          configdrive_copy_mock,
+                                          execute_mock):
         image_info = _build_fake_image_info()
         download_mock.return_value = None
         write_mock.return_value = None
         dispatch_mock.return_value = 'manager'
         configdrive_copy_mock.return_value = None
+        list_part_mock.return_value = [mock.MagicMock()]
 
         async_result = self.agent_extension.prepare_image(
             image_info=image_info,
@@ -739,6 +764,56 @@ class TestStandbyExtension(base.IronicAgentTest):
 
     @mock.patch('ironic_lib.disk_utils.get_disk_identifier',
                 lambda dev: 'ROOT')
+    @mock.patch('ironic_lib.disk_utils.work_on_disk', autospec=True)
+    @mock.patch('ironic_lib.disk_utils.create_config_drive_partition',
+                autospec=True)
+    @mock.patch('ironic_lib.disk_utils.list_partitions',
+                autospec=True)
+    @mock.patch('ironic_python_agent.hardware.dispatch_to_managers',
+                autospec=True)
+    @mock.patch('ironic_python_agent.extensions.standby._write_image',
+                autospec=True)
+    @mock.patch('ironic_python_agent.extensions.standby._download_image',
+                autospec=True)
+    def test_prepare_image_bad_partition(self,
+                                         download_mock,
+                                         write_mock,
+                                         dispatch_mock,
+                                         list_part_mock,
+                                         configdrive_copy_mock,
+                                         work_on_disk_mock):
+        list_part_mock.side_effect = processutils.ProcessExecutionError
+        image_info = _build_fake_image_info()
+        download_mock.return_value = None
+        write_mock.return_value = None
+        dispatch_mock.return_value = 'manager'
+        configdrive_copy_mock.return_value = None
+        work_on_disk_mock.return_value = {
+            'root uuid': 'a318821b-2a60-40e5-a011-7ac07fce342b',
+            'partitions': {
+                'root': '/dev/foo-part1',
+            }
+        }
+
+        async_result = self.agent_extension.prepare_image(
+            image_info=image_info,
+            configdrive=None
+        )
+        async_result.join()
+
+        download_mock.assert_called_once_with(image_info)
+        write_mock.assert_called_once_with(image_info, 'manager')
+        dispatch_mock.assert_called_once_with('get_os_install_device')
+
+        self.assertFalse(configdrive_copy_mock.called)
+        self.assertEqual('FAILED', async_result.command_status)
+
+    @mock.patch('ironic_python_agent.utils.execute', mock.Mock())
+    @mock.patch('ironic_lib.disk_utils.list_partitions',
+                lambda _dev: [mock.Mock()])
+    @mock.patch('ironic_lib.disk_utils.get_disk_identifier',
+                lambda dev: 'ROOT')
+    @mock.patch('ironic_lib.disk_utils.work_on_disk', autospec=True)
     @mock.patch('ironic_lib.disk_utils.create_config_drive_partition',
                 autospec=True)
     @mock.patch('ironic_python_agent.hardware.dispatch_to_managers',
@@ -749,9 +824,21 @@ class TestStandbyExtension(base.IronicAgentTest):
                 '._stream_raw_image_onto_device', autospec=True)
     def _test_prepare_image_raw(self, image_info, stream_mock,
                                 cache_write_mock, dispatch_mock,
-                                configdrive_copy_mock):
-        dispatch_mock.return_value = '/dev/foo'
+                                configdrive_copy_mock, work_on_disk_mock,
+                                partition=False):
+        # Calls get_cpus().architecture with partition images
+        dispatch_mock.side_effect = ['/dev/foo', self.fake_cpu]
         configdrive_copy_mock.return_value = None
+        work_on_disk_mock.return_value = {
+            'root uuid': 'a318821b-2a60-40e5-a011-7ac07fce342b',
+            'partitions': {
+                'root': '/dev/foo-part1',
+            }
+        }
+        if partition:
+            expected_device = '/dev/foo-part1'
+        else:
+            expected_device = '/dev/foo'
 
         async_result = self.agent_extension.prepare_image(
             image_info=image_info,
@@ -759,14 +846,15 @@ class TestStandbyExtension(base.IronicAgentTest):
         )
         async_result.join()
 
-        dispatch_mock.assert_called_once_with('get_os_install_device')
+        dispatch_mock.assert_any_call('get_os_install_device')
         self.assertFalse(configdrive_copy_mock.called)
 
         # Assert we've streamed the image or not
         if image_info['stream_raw_images']:
             stream_mock.assert_called_once_with(mock.ANY, image_info,
-                                                '/dev/foo')
+                                                expected_device)
             self.assertFalse(cache_write_mock.called)
+            self.assertIs(partition, work_on_disk_mock.called)
         else:
             cache_write_mock.assert_called_once_with(mock.ANY, image_info,
                                                      '/dev/foo')
@@ -783,6 +871,18 @@ class TestStandbyExtension(base.IronicAgentTest):
         image_info['disk_format'] = 'raw'
         image_info['stream_raw_images'] = False
         self._test_prepare_image_raw(image_info)
+
+    def test_prepare_partition_image_raw_stream_true(self):
+        image_info = _build_fake_partition_image_info()
+        image_info['disk_format'] = 'raw'
+        image_info['stream_raw_images'] = True
+        self._test_prepare_image_raw(image_info, partition=True)
+
+    def test_prepare_partition_image_raw_and_stream_false(self):
+        image_info = _build_fake_partition_image_info()
+        image_info['disk_format'] = 'raw'
+        image_info['stream_raw_images'] = False
+        self._test_prepare_image_raw(image_info, partition=True)
 
     @mock.patch('ironic_python_agent.utils.execute', autospec=True)
     def test_run_shutdown_command_invalid(self, execute_mock):
@@ -1017,10 +1117,10 @@ class TestStandbyExtension(base.IronicAgentTest):
         self.assertEqual(expected_msg, result_msg)
 
 
+@mock.patch('hashlib.md5', autospec=True)
+@mock.patch('requests.get', autospec=True)
 class TestImageDownload(base.IronicAgentTest):
 
-    @mock.patch('hashlib.md5', autospec=True)
-    @mock.patch('requests.get', autospec=True)
     def test_download_image(self, requests_mock, md5_mock):
         content = ['SpongeBob', 'SquarePants']
         response = requests_mock.return_value
@@ -1038,16 +1138,14 @@ class TestImageDownload(base.IronicAgentTest):
         self.assertEqual(image_info['checksum'],
                          image_download._hash_algo.hexdigest())
 
-    @mock.patch('time.time', autospec=True)
-    @mock.patch('requests.get', autospec=True)
     def test_download_image_fail(self, requests_mock, time_mock):
         response = requests_mock.return_value
         response.status_code = 401
         response.text = 'Unauthorized'
         time_mock.return_value = 0.0
         image_info = _build_fake_image_info()
-        msg = ('Error downloading image: Download of image id fake_id failed: '
-               'URL: http://example.org; time: 0.0 seconds. Error: '
+        msg = ('Error downloading image: Download of image fake_id failed: '
+               'URL: http://example.org; time: .* seconds. Error: '
                'Received status code 401 from http://example.org, expected '
                '200. Response body: Unauthorized')
         self.assertRaisesRegex(errors.ImageDownloadError, msg,
@@ -1055,3 +1153,117 @@ class TestImageDownload(base.IronicAgentTest):
         requests_mock.assert_called_once_with(image_info['urls'][0],
                                               cert=None, verify=True,
                                               stream=True, proxies={})
+
+    def test_download_image_and_checksum(self, requests_mock, md5_mock):
+        content = ['SpongeBob', 'SquarePants']
+        fake_cs = "019fe036425da1c562f2e9f5299820bf"
+        cs_response = mock.Mock()
+        cs_response.status_code = 200
+        cs_response.text = fake_cs + '\n'
+        response = mock.Mock()
+        response.status_code = 200
+        response.iter_content.return_value = content
+        requests_mock.side_effect = [cs_response, response]
+
+        image_info = _build_fake_image_info()
+        image_info['checksum'] = 'http://example.com/checksum'
+        md5_mock.return_value.hexdigest.return_value = fake_cs
+        image_download = standby.ImageDownload(image_info)
+
+        self.assertEqual(content, list(image_download))
+        requests_mock.assert_has_calls([
+            mock.call('http://example.com/checksum', cert=None, verify=True,
+                      stream=True, proxies={}),
+            mock.call(image_info['urls'][0], cert=None, verify=True,
+                      stream=True, proxies={}),
+        ])
+        self.assertEqual(fake_cs, image_download._hash_algo.hexdigest())
+
+    def test_download_image_and_checksum_multiple(self, requests_mock,
+                                                  md5_mock):
+        content = ['SpongeBob', 'SquarePants']
+        fake_cs = "019fe036425da1c562f2e9f5299820bf"
+        cs_response = mock.Mock()
+        cs_response.status_code = 200
+        cs_response.text = """
+foobar  irrelevant file.img
+%s  image.img
+""" % fake_cs
+        response = mock.Mock()
+        response.status_code = 200
+        response.iter_content.return_value = content
+        requests_mock.side_effect = [cs_response, response]
+
+        image_info = _build_fake_image_info(
+            'http://example.com/path/image.img')
+        image_info['checksum'] = 'http://example.com/checksum'
+        md5_mock.return_value.hexdigest.return_value = fake_cs
+        image_download = standby.ImageDownload(image_info)
+
+        self.assertEqual(content, list(image_download))
+        requests_mock.assert_has_calls([
+            mock.call('http://example.com/checksum', cert=None, verify=True,
+                      stream=True, proxies={}),
+            mock.call(image_info['urls'][0], cert=None, verify=True,
+                      stream=True, proxies={}),
+        ])
+        self.assertEqual(fake_cs, image_download._hash_algo.hexdigest())
+
+    def test_download_image_and_checksum_unknown_file(self, requests_mock,
+                                                      md5_mock):
+        content = ['SpongeBob', 'SquarePants']
+        fake_cs = "019fe036425da1c562f2e9f5299820bf"
+        cs_response = mock.Mock()
+        cs_response.status_code = 200
+        cs_response.text = """
+foobar  irrelevant file.img
+%s  not-my-image.img
+""" % fake_cs
+        response = mock.Mock()
+        response.status_code = 200
+        response.iter_content.return_value = content
+        requests_mock.side_effect = [cs_response, response]
+
+        image_info = _build_fake_image_info(
+            'http://example.com/path/image.img')
+        image_info['checksum'] = 'http://example.com/checksum'
+        md5_mock.return_value.hexdigest.return_value = fake_cs
+        self.assertRaisesRegex(errors.ImageDownloadError,
+                               'Checksum file does not contain name image.img',
+                               standby.ImageDownload, image_info)
+
+    def test_download_image_and_checksum_empty_file(self, requests_mock,
+                                                    md5_mock):
+        content = ['SpongeBob', 'SquarePants']
+        cs_response = mock.Mock()
+        cs_response.status_code = 200
+        cs_response.text = " "
+        response = mock.Mock()
+        response.status_code = 200
+        response.iter_content.return_value = content
+        requests_mock.side_effect = [cs_response, response]
+
+        image_info = _build_fake_image_info(
+            'http://example.com/path/image.img')
+        image_info['checksum'] = 'http://example.com/checksum'
+        self.assertRaisesRegex(errors.ImageDownloadError,
+                               'Empty checksum file',
+                               standby.ImageDownload, image_info)
+
+    def test_download_image_and_checksum_failed(self, requests_mock, md5_mock):
+        content = ['SpongeBob', 'SquarePants']
+        cs_response = mock.Mock()
+        cs_response.status_code = 400
+        cs_response.text = " "
+        response = mock.Mock()
+        response.status_code = 200
+        response.iter_content.return_value = content
+        requests_mock.side_effect = [cs_response, response]
+
+        image_info = _build_fake_image_info(
+            'http://example.com/path/image.img')
+        image_info['checksum'] = 'http://example.com/checksum'
+        self.assertRaisesRegex(errors.ImageDownloadError,
+                               'Received status code 400 from '
+                               'http://example.com/checksum',
+                               standby.ImageDownload, image_info)
